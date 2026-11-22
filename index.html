@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>飞马象棋 · 马不蹩腿</title>
+<title>Variant Xiangqi · 规则可变动象棋</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23f3e4c4' stroke='%23a32f24' stroke-width='6'/%3E%3Ctext x='50' y='72' font-size='58' text-anchor='middle' fill='%23a32f24' font-family='serif'%3E傌%3C/text%3E%3C/svg%3E" />
 <style>
   :root{
@@ -123,7 +123,6 @@
     background:#d9a751; border-color:#d9a751;
     box-shadow:inset 0 0 0 2px #1a1f26;
   }
-  .switches .sw.dim{ opacity:.42; pointer-events:none; }
 
   /* ---------- 按钮 ---------- */
   .actions{ display:flex; gap:8px; }
@@ -207,8 +206,8 @@
     <div class="brand">
       <div class="logo">傌</div>
       <div>
-        <h1>飞马象棋</h1>
-        <p id="ruleSub">规则变体 · 马永远不会被蹩腿</p>
+        <h1>Variant Xiangqi</h1>
+        <p id="ruleSub">规则可变动象棋 · 马永远不会被蹩腿</p>
       </div>
     </div>
     <span class="badge" id="ruleBadge">马蹄无阻</span>
@@ -274,7 +273,6 @@
           <button class="sw" data-rule="elephantNoEye">象不塞眼</button>
           <button class="sw" data-rule="advisorFree">士可出宫</button>
           <button class="sw" data-rule="noRiver">无水河</button>
-          <button class="sw" data-rule="fog">暗棋</button>
         </div>
       </div>
 
@@ -313,7 +311,7 @@
     RED, BLACK, K, A, E, H, R, C, P,
     colorOf, kindOf, rowOf, colOf, sqOf,
     initialBoard, legalMoves, movesFrom, inCheck,
-    findKing, notate, makeMove, unmakeMove, mkMove, mvFrom, mvTo,
+    findKing, notate, think, makeMove, unmakeMove, mkMove, mvFrom, mvTo,
     CHARS, PRESET_NAMES, setRules, getRules, presetName,
   } = X;
 
@@ -323,7 +321,7 @@
   const state = {
     board: initialBoard(),
     turn: RED,
-    history: [],       // { mv, cap, text, rev }
+    history: [],       // { mv, cap, text }
     sel: -1,
     targets: [],
     mode: 'ai',
@@ -334,24 +332,10 @@
     thinking: false,
     over: null,        // { winner, reason }
     lastMove: null,
-    fog: false,                        // 暗棋：对方棋子看不见
-    revealed: new Array(90).fill(false), // 该格棋子是否已现形
-    revealMsg: null,                   // 刚吃掉的暗子提示
   };
   let gameId = 0;
-  let revealTimer = null;
 
   const isHumanTurn = () => state.mode === 'pvp' || state.turn === state.humanColor;
-  const aiSide = () => 1 - state.humanColor;
-
-  /** 这格棋子对「玩家」是否可见：暗棋下对方未现形的棋子看不到 */
-  function visibleToHuman(sq) {
-    const p = state.board[sq];
-    if (!p || !state.fog) return true;
-    if (colorOf(p) === state.humanColor) return true;
-    if (kindOf(p) === K) return true;        // 将帅始终可见，否则无法判断将军
-    return state.revealed[sq];
-  }
 
   /* ================= Canvas 几何 ================= */
   const cvs = document.getElementById('board');
@@ -501,46 +485,6 @@
   }
 
   /* ================= 绘制：棋子 ================= */
-  /** 暗子：面朝下的棋子，只有轮廓和一点暗示 */
-  function drawHiddenPiece(x, y) {
-    const s = G.s;
-    const rad = s * 0.435;
-    ctx.save();
-
-    ctx.beginPath();
-    ctx.arc(x, y + rad * 0.11, rad, 0, TAU);
-    ctx.fillStyle = 'rgba(40,26,10,.3)';
-    ctx.fill();
-
-    const g = ctx.createRadialGradient(x - rad * 0.32, y - rad * 0.38, rad * 0.1, x, y, rad);
-    g.addColorStop(0, '#6b5949');
-    g.addColorStop(.6, '#4e4034');
-    g.addColorStop(1, '#33291f');
-    ctx.beginPath();
-    ctx.arc(x, y, rad, 0, TAU);
-    ctx.fillStyle = g;
-    ctx.fill();
-
-    ctx.lineWidth = Math.max(1.2, s * 0.03);
-    ctx.strokeStyle = 'rgba(196,160,110,.5)';
-    ctx.beginPath();
-    ctx.arc(x, y, rad * 0.94, 0, TAU);
-    ctx.stroke();
-
-    ctx.lineWidth = Math.max(1, s * 0.012);
-    ctx.strokeStyle = 'rgba(196,160,110,.2)';
-    ctx.beginPath();
-    ctx.arc(x, y, rad * 0.78, 0, TAU);
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(214,183,130,.55)';
-    ctx.font = (s * 0.42).toFixed(1) + 'px "KaiTi","STKaiti","Songti SC",serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('？', x, y + s * 0.02);
-    ctx.restore();
-  }
-
   function drawPiece(x, y, p, dim) {
     const s = G.s;
     const rad = s * 0.435;
@@ -635,8 +579,7 @@
         x = fx + (x - fx) * p0;
         y = fy + (y - fy) * p0;
       }
-      if (visibleToHuman(i)) drawPiece(x, y, p);
-      else drawHiddenPiece(x, y);
+      drawPiece(x, y, p);
     }
 
     // 选中环
@@ -655,8 +598,7 @@
     if (state.showTargets && state.targets.length) {
       for (const t of state.targets) {
         const x = px(colOf(t)), y = py(rowOf(t));
-        // 暗棋里看不见的子不画吃子红圈——你会以为只是一步普通移动
-        if (state.board[t] && visibleToHuman(t)) {
+        if (state.board[t]) {
           ctx.strokeStyle = 'rgba(196,58,44,.78)';
           ctx.lineWidth = Math.max(1.6, s * 0.05);
           ctx.beginPath();
@@ -771,7 +713,6 @@
       if (inCheck(state.board, state.turn)) { sub = '将军！'; cls += ' warn'; }
       else if (state.mode === 'ai') sub = isHumanTurn() ? '轮到你走' : '轮到电脑走';
     }
-    if (!state.over && state.revealMsg) { sub = state.revealMsg; cls = 'status-sub warn'; }
     el.statusSub.textContent = sub;
     el.statusSub.className = cls;
 
@@ -816,9 +757,6 @@
     state.over = null;
     state.thinking = false;
     state.lastMove = null;
-    state.revealed = new Array(90).fill(false);
-    state.revealMsg = null;
-    if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
     anim = null;
     el.overlay.hidden = true;
     draw();
@@ -842,10 +780,7 @@
       }
       let res = null;
       try {
-        // 暗棋下走不完全信息搜索：它只能看见已经现形的子
-        res = state.fog
-          ? X.thinkFog(state.board, side, state.level, state.revealed)
-          : X.think(state.board, side, state.level);
+        res = think(state.board, side, state.level);
       } catch (e) {
         const ms = legalMoves(state.board, side);
         res = ms.length ? { move: ms[(Math.random() * ms.length) | 0] } : null;
@@ -873,23 +808,12 @@
     const text = notate(b, mv);
     const moverSide = state.turn;
     const id = gameId;
-    const revBefore = state.revealed.slice();
-    // 走到看不见的暗子上：吃掉并现形
-    const foundHidden = cap && state.fog && !visibleToHuman(to) && colorOf(cap) !== moverSide;
 
     makeMove(b, mv);
-    state.history.push({ mv, cap, text, rev: revBefore });
+    state.history.push({ mv, cap, text });
     state.lastMove = mv;
     state.sel = -1;
     state.targets = [];
-    state.revealed[from] = false;
-    state.revealed[to] = true;
-
-    if (foundHidden) {
-      state.revealMsg = '吃暗子：' + CHARS[colorOf(cap)][kindOf(cap) - 1];
-      if (revealTimer) clearTimeout(revealTimer);
-      revealTimer = setTimeout(() => { state.revealMsg = null; refreshStatus(); }, 3200);
-    }
 
     const opp = 1 - moverSide;
     const gave = inCheck(b, opp);
@@ -976,7 +900,6 @@
     const from = mvFrom(h.mv), to = mvTo(h.mv);
     state.board[from] = state.board[to];
     state.board[to] = h.cap;
-    if (h.rev) state.revealed = h.rev.slice();
     state.turn = 1 - state.turn;
   }
 
@@ -1005,7 +928,6 @@
       state.mode = val;
       el.rowColor.classList.toggle('dim', val === 'pvp');
       el.rowLevel.classList.toggle('dim', val === 'pvp');
-      if (val === 'pvp' && state.fog) setFog(false);  // 双人同屏，迷雾没有意义
       syncRuleUI();
       resetGame();
     } else if (key === 'color') {
@@ -1033,26 +955,21 @@
     const cur = presetName();
     presetBtns.forEach((b) => b.classList.toggle('on', b.dataset.preset === cur));
     const r = getRules();
-    switchBtns.forEach((b) => {
-      const k = b.dataset.rule;
-      const on = k === 'fog' ? state.fog : !!r[k];
-      b.classList.toggle('on', on);
-      // 双人模式下暗棋不可用
-      b.classList.toggle('dim', k === 'fog' && state.mode === 'pvp');
-    });
+    switchBtns.forEach((b) => b.classList.toggle('on', !!r[b.dataset.rule]));
+
     const name = PRESET_NAMES[cur] || '自定义';
-    el.ruleBadge.textContent = name + (state.fog ? ' · 暗棋' : '');
-    el.ruleBadge.classList.toggle('classic', cur === 'classic' && !state.fog);
+    el.ruleBadge.textContent = name;
+    el.ruleBadge.classList.toggle('classic', cur === 'classic');
 
     const subs = {
-      classic: '标准中国象棋 · 用来对照',
-      feima: '规则变体 · 马永远不会被蹩腿',
-      unobstructed: '规则变体 · 马、象、士 全都不受阻挡',
-      wild: '规则变体 · 无水河 + 士出宫 + 马不蹩腿',
-      custom: '规则变体 · 自定义组合',
+      classic: '规则可变动象棋 · 标准规则，用来对照',
+      feima: '规则可变动象棋 · 马永远不会被蹩腿',
+      unobstructed: '规则可变动象棋 · 马、象、士 全都不受阻挡',
+      wild: '规则可变动象棋 · 无水河 + 士出宫 + 马不蹩腿',
+      custom: '规则可变动象棋 · 自定义组合',
     };
     const sub = document.getElementById('ruleSub');
-    if (sub) sub.textContent = subs[cur] + (state.fog ? ' · 暗棋' : '');
+    if (sub) sub.textContent = subs[cur];
 
     renderRuleText();
   }
@@ -1072,27 +989,13 @@
     li.push(r.noRiver
       ? '<p><b>无水河。</b>没有河界：兵从一开始就能横走，象也能过河参战。</p>'
       : '<p><b>有河界。</b>兵过河才能横走，象不能过河（经典规则）。</p>');
-    if (state.fog) {
-      li.push('<p><b>暗棋。</b>对方未动过的棋子看不见（显示为「？」），' +
-        '一旦移动过就永久现形；将帅始终可见。<b>可以走进迷雾吃子</b>——吃掉才知道是什么。' +
-        '电脑同样看不见你的暗子。</p>');
-    }
     li.push('<p style="color:#8d98a6">改动规则会重开一局。</p>');
     document.getElementById('ruleText').innerHTML = li.join('');
-  }
-
-  function setFog(on) {
-    state.fog = !!on;
-    if (!state.fog) {
-      state.revealed = new Array(90).fill(false);
-      state.revealMsg = null;
-    }
   }
 
   presetBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       setRules(btn.dataset.preset);
-      state.fog = false;
       syncRuleUI();
       resetGame();
       sfx('move');
@@ -1101,15 +1004,10 @@
 
   switchBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
+      const r = getRules();
       const k = btn.dataset.rule;
-      if (k === 'fog') {
-        if (state.mode === 'pvp') return;
-        setFog(!state.fog);
-      } else {
-        const r = getRules();
-        r[k] = !r[k];
-        setRules(r);
-      }
+      r[k] = !r[k];
+      setRules(r);
       syncRuleUI();
       resetGame();
       sfx('move');
@@ -1138,7 +1036,7 @@
   }
   window.addEventListener('resize', resize);
 
-  setRules('feima');   // 默认就是「飞马」：马不蹩腿
+  setRules('feima');   // 默认「飞马」：马不蹩腿
   syncRuleUI();
 
   requestAnimationFrame(() => {
@@ -1148,8 +1046,8 @@
 
   // 调试钩子：方便自动化测试或排查问题，正常对局用不到
   window.XQ = {
-    state, G, draw, resetGame, playMove, handleSquare, syncRuleUI, setFog,
-    sq: sqOf, mk: mkMove, rules: X.rules, setRules, getRules, presetName, thinkFog: X.thinkFog,
+    state, G, draw, resetGame, playMove, handleSquare, syncRuleUI,
+    sq: sqOf, mk: mkMove, setRules, getRules, presetName,
   };
 })();
 </script>

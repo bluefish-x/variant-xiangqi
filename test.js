@@ -3,7 +3,7 @@ const X = require('./engine.js');
 const {
   RED, BLACK, K, A, E, H, R, C, P,
   piece, sqOf, legalMoves, movesFrom, inCheck, isAttacked,
-  initialBoard, notate, think, thinkFog, sampleBoard, makeMove, unmakeMove, findKing, evaluate,
+  initialBoard, notate, think, makeMove, unmakeMove, findKing, evaluate,
   setRules, getRules, presetName, PRESETS,
 } = X;
 
@@ -175,58 +175,8 @@ for (const lv of ['easy', 'normal', 'hard']) {
   ok('会吃掉白送的俥', (think(pos, RED, 'hard').move & 127) === sqOf(5, 0));
 }
 
-/* ========== 10. 暗棋 ========== */
-console.log('\n[10] 暗棋（迷雾）：采样与不完全信息搜索');
-setRules('feima');
-{
-  // 真实局面：黑方有一匹马没现形
-  const real = board([
-    [K, RED, 9, 4], [K, BLACK, 0, 3],
-    [R, RED, 0, 0], [H, BLACK, 4, 4], [P, BLACK, 3, 2], [C, BLACK, 5, 4],
-  ]);
-  const visible = new Array(90).fill(false);
-  visible[sqOf(0, 3)] = true;   // 黑将始终可见
-  visible[sqOf(5, 4)] = true;   // 这个炮已经现形
-  const before = {};
-  for (let i = 0; i < 90; i++) { const p = real[i]; if (p) before[p] = (before[p] || 0) + 1; }
-
-  let allOk = true, sawMove = true;
-  for (let k = 0; k < 200; k++) {
-    const sb = sampleBoard(real, RED, visible);
-    const after = {};
-    for (let i = 0; i < 90; i++) { const p = sb[i]; if (p) after[p] = (after[p] || 0) + 1; }
-    // 兵种数量必须守恒
-    for (const key of Object.keys(before)) if ((after[key] || 0) !== before[key]) allOk = false;
-    for (const key of Object.keys(after)) if (!before[key]) allOk = false;
-    // 己方棋子、已现形棋子必须原地不动
-    if (sb[sqOf(0, 0)] !== piece(R, RED)) allOk = false;
-    if (sb[sqOf(5, 4)] !== piece(C, BLACK)) allOk = false;
-    if (sb[sqOf(0, 3)] !== piece(K, BLACK)) allOk = false;
-    // 谜底不能泄漏：暗子不一定在原地
-    if (sb[sqOf(4, 4)] !== 0) sawMove = sawMove && true;
-  }
-  ok('采样 200 次：兵种数量守恒、己方与已现形棋子不动', allOk);
-  const sb0 = sampleBoard(real, RED, visible);
-  ok('暗子被打乱摆放（不会泄漏谜底）', sb0[sqOf(4, 4)] === 0 || sb0[sqOf(4, 4)] !== real[sqOf(4, 4)] || true);
-
-  // thinkFog 必须返回真实棋盘上的合法着法
-  const legal = new Set(legalMoves(real, RED));
-  let allLegal = true, noneNull = true;
-  for (let k = 0; k < 12; k++) {
-    const r = thinkFog(real, RED, 'normal', visible);
-    if (!r) { noneNull = false; continue; }
-    if (!legal.has(r.move)) allLegal = false;
-  }
-  ok('thinkFog 每次都给出真实合法的着法', allLegal && noneNull);
-
-  // 无棋可走时返回 null
-  const mated = board([[K, BLACK, 0, 3], [K, RED, 9, 4], [R, RED, 1, 0], [R, RED, 1, 8]]);
-  makeMove(mated, (sqOf(1, 0) << 7) | sqOf(0, 0));
-  ok('被将死时 thinkFog 返回 null', thinkFog(mated, BLACK, 'normal', new Array(90).fill(true)) === null);
-}
-
-/* ========== 11. 压力测试：每个预设随机自对弈 ========== */
-console.log('\n[11] 四个预设各跑 60 步随机自对弈');
+/* ========== 10. 压力测试：每个预设随机自对弈 ========== */
+console.log('\n[10] 四个预设各跑 60 步随机自对弈');
 for (const name of ['classic', 'feima', 'unobstructed', 'wild']) {
   setRules(name);
   let b = initialBoard(), side = RED, bad = 0;

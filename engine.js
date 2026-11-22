@@ -1,8 +1,9 @@
 /*!
- * engine.js —— 中国象棋规则与搜索引擎
+ * engine.js —— 规则可变动象棋：规则与搜索引擎
  *
- * 规则变体（默认开启）：马（傌/馬）永不受「蹩马腿」限制。
- * 把 config.horseLegBlocked 设为 true 即可回到经典规则，用于对照。
+ * 四条规则开关（rules）：马不蹩腿 / 象不塞眼 / 士可出宫 / 无水河，
+ * 全关即标准象棋。每个开关都同时作用于「走法生成」和「被攻击判定」，
+ * 两边共用一个 rules 对象，避免出现「能走但走了算被将」的矛盾。
  *
  * 棋盘 10 行 × 9 列，索引 = row * 9 + col，row 0 在顶部（黑方底线）。
  */
@@ -76,15 +77,6 @@
       if (Object.keys(rules).every((x) => !!v[x] === rules[x])) return k;
     }
     return 'custom';
-  }
-
-  function shuffle(arr, rnd) {
-    const r = rnd || Math.random;
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(r() * (i + 1));
-      const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
-    }
-    return arr;
   }
 
   const kindOf = (p) => p & 7;
@@ -519,105 +511,6 @@
     return { move: best.move, score: best.score, depth: best.depth, nodes: ctx.nodes };
   }
 
-  /* ================= 暗棋（迷雾）：采样 + 不完全信息搜索 ================= */
-  /**
-   * 按「已知信息」重建一个可能局面。
-   * visible[sq] === true 表示该格棋子已现形（双方都看得见）；false 表示看不见。
-   * 己方棋子永远已知；将/帅按约定始终可见。
-   * 看不见的敌子按「同兵种数量守恒」随机撒回空白格，撒放时尽量遵守该兵种的合法活动范围，
-   * 这样采样出来的局面才像真的。
-   */
-  function sampleBoard(real, side, visible, rnd) {
-    const b = real.slice();
-    const missing = [];        // 未知敌子的兵种列表
-    const empties = [];
-    const foe = 1 - side;
-
-    for (let i = 0; i < SIZE; i++) {
-      const p = b[i];
-      if (!p) { empties.push(i); continue; }
-      if ((p >> 3) === side) continue;          // 己方：全知
-      if (visible && visible[i]) continue;      // 已现形：全知
-      if ((p & 7) === K) continue;              // 将帅始终可见（约定）
-      missing.push(p & 7);
-      b[i] = 0;
-      empties.push(i);
-    }
-    if (!missing.length) return b;
-
-    shuffle(empties, rnd);
-    shuffle(missing, rnd);
-
-    const canPlace = (kind, sq) => {
-      const r = rowOf(sq), c = colOf(sq);
-      if (kind === A && !rules.advisorFree) return inPalace(r, c, foe);
-      if (kind === E && !rules.noRiver) return foe === RED ? r >= 5 : r <= 4;
-      if (kind === P) return foe === RED ? r <= 6 : r >= 3; // 兵卒不可能在自己后两排
-      return true;
-    };
-
-    for (const kind of missing) {
-      let pick = -1;
-      for (let t = 0; t < empties.length; t++) {
-        if (canPlace(kind, empties[t])) { pick = t; break; }
-      }
-      if (pick < 0) pick = 0;                    // 兜底：随便放
-      if (!empties.length) break;
-      const sq = empties.splice(pick, 1)[0];
-      b[sq] = piece(kind, foe);
-    }
-    return b;
-  }
-
-  /**
-   * 暗棋专用：对 N 个采样局面分别搜索，按「平均分」挑招。
-   * 这样 AI 是在信息不足的情况下做决策，而不是偷看你的暗子。
-   * 最后必须回到真实棋盘做一次合法性过滤——它以为能穿过去的格子，可能真的站着人。
-   */
-  function thinkFog(b, side, level, visible, samples) {
-    const cfg = LEVELS[level] || LEVELS.normal;
-    const N = samples || 6;
-    const depth = Math.max(2, cfg.depth - 2);
-    const t0 = Date.now();
-    const acc = new Map();
-    let used = 0;
-
-    for (let i = 0; i < N; i++) {
-      const left = cfg.time - (Date.now() - t0);
-      if (i > 0 && left < 50) break;
-      const sb = sampleBoard(b, side, visible);
-      const ctx = { nodes: 0, deadline: Date.now() + Math.max(50, Math.floor(left / (N - i))) };
-      let res = null;
-      try { res = rootSearch(sb, side, depth, ctx); } catch (e) { continue; }
-      if (!res || res.move == null) continue;
-      used++;
-      for (const pair of res.scored) {
-        const cur = acc.get(pair[0]) || [0, 0];
-        cur[0] += pair[1]; cur[1]++;
-        acc.set(pair[0], cur);
-      }
-    }
-
-    const real = new Set(legalMoves(b, side));
-    if (!real.size) return null;
-    if (!used || !acc.size) {
-      const ms = Array.from(real);
-      return { move: ms[(Math.random() * ms.length) | 0], score: 0, depth, nodes: 0, samples: 0 };
-    }
-
-    let best = null, bestScore = -Infinity;
-    for (const [mv, v] of acc) {
-      if (!real.has(mv)) continue;               // 撞到看不见的暗子，走不了
-      const avg = v[0] / v[1];
-      if (avg > bestScore) { bestScore = avg; best = mv; }
-    }
-    if (best == null) {
-      const ms = Array.from(real);
-      return { move: ms[(Math.random() * ms.length) | 0], score: 0, depth, nodes: 0, samples: used };
-    }
-    return { move: best, score: bestScore, depth, nodes: 0, samples: used };
-  }
-
   /* ================= 中文记谱 ================= */
   const CN_NUM = '一二三四五六七八九';
 
@@ -684,7 +577,7 @@
     initialBoard, genMoves, genMovesFrom, legalMoves, movesFrom,
     makeMove, unmakeMove, inCheck, isAttacked, findKing,
     // 引擎
-    evaluate, think, thinkFog, sampleBoard, perft,
+    evaluate, think, perft,
     // 记谱
     notate,
   };
