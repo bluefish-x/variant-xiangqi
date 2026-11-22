@@ -94,6 +94,37 @@
   .seg button:hover{ color:var(--text); }
   .seg button.on{ background:rgba(217,167,81,.2); color:#f1d09a; box-shadow:inset 0 0 0 1px rgba(217,167,81,.3); }
 
+  /* 规则预设 + 开关 */
+  .presets{ display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:9px; }
+  .presets button{
+    appearance:none; border:1px solid var(--line); background:rgba(255,255,255,.04);
+    color:var(--muted); font:inherit; font-size:12.5px; padding:7px 0; border-radius:9px; cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+  }
+  .presets button:hover{ color:var(--text); }
+  .presets button.on{
+    background:linear-gradient(180deg, rgba(217,167,81,.26), rgba(217,167,81,.14));
+    border-color:rgba(217,167,81,.45); color:#f5d9a8; font-weight:600;
+  }
+  .switches{ display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+  .switches .sw{
+    display:flex; align-items:center; gap:7px; text-align:left;
+    appearance:none; border:1px solid var(--line); background:rgba(255,255,255,.03);
+    color:var(--muted); font:inherit; font-size:12.5px; padding:7px 9px; border-radius:9px; cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+  }
+  .switches .sw::before{
+    content:''; width:13px; height:13px; border-radius:4px; flex:none;
+    border:1.5px solid rgba(255,255,255,.25); background:rgba(0,0,0,.25); transition:all .15s;
+  }
+  .switches .sw:hover{ color:var(--text); }
+  .switches .sw.on{ color:#f1d09a; border-color:rgba(217,167,81,.35); background:var(--gold-dim); }
+  .switches .sw.on::before{
+    background:#d9a751; border-color:#d9a751;
+    box-shadow:inset 0 0 0 2px #1a1f26;
+  }
+  .switches .sw.dim{ opacity:.42; pointer-events:none; }
+
   /* ---------- 按钮 ---------- */
   .actions{ display:flex; gap:8px; }
   .btn{
@@ -177,7 +208,7 @@
       <div class="logo">傌</div>
       <div>
         <h1>飞马象棋</h1>
-        <p>规则变体 · 马永远不会被蹩腿</p>
+        <p id="ruleSub">规则变体 · 马永远不会被蹩腿</p>
       </div>
     </div>
     <span class="badge" id="ruleBadge">马蹄无阻</span>
@@ -228,12 +259,22 @@
             <button data-value="hard">高手</button>
           </div>
         </div>
-        <div class="row">
-          <label>马腿</label>
-          <div class="seg" data-key="horseLeg">
-            <button data-value="free" class="on">不蹩腿</button>
-            <button data-value="classic">经典蹩腿</button>
-          </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">规则变体</div>
+        <div class="presets" id="presets">
+          <button data-preset="classic">经典</button>
+          <button data-preset="feima" class="on">飞马</button>
+          <button data-preset="unobstructed">无阻</button>
+          <button data-preset="wild">狂野</button>
+        </div>
+        <div class="switches" id="switches">
+          <button class="sw on" data-rule="horseNoLeg">马不蹩腿</button>
+          <button class="sw" data-rule="elephantNoEye">象不塞眼</button>
+          <button class="sw" data-rule="advisorFree">士可出宫</button>
+          <button class="sw" data-rule="noRiver">无水河</button>
+          <button class="sw" data-rule="fog">暗棋</button>
         </div>
       </div>
 
@@ -254,12 +295,9 @@
         <div class="moves" id="moveList"><div class="empty">还没有走子</div></div>
       </div>
 
-      <div class="card rules">
-        <div class="card-title">这条新规则</div>
-        <p><b>马不吃蹩。</b>正常象棋里，马要往某个方向跳，紧挨着它的那一格（马腿）被棋子占住就不能跳。这里<b>取消了这个限制</b>——只要落点在棋盘内且没有己方棋子，马就能跳过去。</p>
-        <p>开局就能看出差别：两个正马本来被自己的象堵着马腿，现在 <b>傌八进七 / 傌二进三</b> 一步就能走。</p>
-        <p>其余全部照旧：象被塞象眼不能飞、炮要翻山才能吃、兵过河才能横走、两帅不能照面、被将军必须应将。</p>
-        <p style="color:#8d98a6">切到「经典蹩腿」可以对照感受差别（会重开一局）。</p>
+      <div class="card rules" id="ruleCard">
+        <div class="card-title">当前规则</div>
+        <div id="ruleText"></div>
       </div>
     </aside>
   </main>
@@ -272,11 +310,11 @@
 
   const X = window.Xiangqi;
   const {
-    RED, BLACK, K, A, E, H, R, C, P, config,
+    RED, BLACK, K, A, E, H, R, C, P,
     colorOf, kindOf, rowOf, colOf, sqOf,
-    initialBoard, legalMoves, movesFrom, inCheck, isAttacked,
-    findKing, notate, think, makeMove, unmakeMove, mkMove, mvFrom, mvTo,
-    CHARS,
+    initialBoard, legalMoves, movesFrom, inCheck,
+    findKing, notate, makeMove, unmakeMove, mkMove, mvFrom, mvTo,
+    CHARS, PRESET_NAMES, setRules, getRules, presetName,
   } = X;
 
   const TAU = Math.PI * 2;
@@ -285,7 +323,7 @@
   const state = {
     board: initialBoard(),
     turn: RED,
-    history: [],       // { mv, cap, text }
+    history: [],       // { mv, cap, text, rev }
     sel: -1,
     targets: [],
     mode: 'ai',
@@ -296,11 +334,24 @@
     thinking: false,
     over: null,        // { winner, reason }
     lastMove: null,
+    fog: false,                        // 暗棋：对方棋子看不见
+    revealed: new Array(90).fill(false), // 该格棋子是否已现形
+    revealMsg: null,                   // 刚吃掉的暗子提示
   };
   let gameId = 0;
-  let lastSound = null;
+  let revealTimer = null;
 
   const isHumanTurn = () => state.mode === 'pvp' || state.turn === state.humanColor;
+  const aiSide = () => 1 - state.humanColor;
+
+  /** 这格棋子对「玩家」是否可见：暗棋下对方未现形的棋子看不到 */
+  function visibleToHuman(sq) {
+    const p = state.board[sq];
+    if (!p || !state.fog) return true;
+    if (colorOf(p) === state.humanColor) return true;
+    if (kindOf(p) === K) return true;        // 将帅始终可见，否则无法判断将军
+    return state.revealed[sq];
+  }
 
   /* ================= Canvas 几何 ================= */
   const cvs = document.getElementById('board');
@@ -385,9 +436,10 @@
       ctx.moveTo(X0, Y0 + r * s);
       ctx.lineTo(X1, Y0 + r * s);
     }
+    const noRiver = getRules().noRiver;
     for (let c = 0; c < 9; c++) {
       const x = X0 + c * s;
-      if (c === 0 || c === 8) {
+      if (c === 0 || c === 8 || noRiver) {
         ctx.moveTo(x, Y0);
         ctx.lineTo(x, Y1);
       } else {
@@ -435,18 +487,60 @@
       }
     }
 
-    // 楚河汉界
-    ctx.save();
-    ctx.fillStyle = 'rgba(86,58,30,.5)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = (s * 0.44).toFixed(1) + 'px "KaiTi","STKaiti","Songti SC","SimSun",serif';
-    ctx.fillText('楚 河', px(2.1), py(4.5));
-    ctx.fillText('漢 界', px(5.9), py(4.5));
-    ctx.restore();
+    // 楚河汉界（无水河时不画）
+    if (!noRiver) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(86,58,30,.5)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = (s * 0.44).toFixed(1) + 'px "KaiTi","STKaiti","Songti SC","SimSun",serif';
+      ctx.fillText('楚 河', px(2.1), py(4.5));
+      ctx.fillText('漢 界', px(5.9), py(4.5));
+      ctx.restore();
+    }
   }
 
   /* ================= 绘制：棋子 ================= */
+  /** 暗子：面朝下的棋子，只有轮廓和一点暗示 */
+  function drawHiddenPiece(x, y) {
+    const s = G.s;
+    const rad = s * 0.435;
+    ctx.save();
+
+    ctx.beginPath();
+    ctx.arc(x, y + rad * 0.11, rad, 0, TAU);
+    ctx.fillStyle = 'rgba(40,26,10,.3)';
+    ctx.fill();
+
+    const g = ctx.createRadialGradient(x - rad * 0.32, y - rad * 0.38, rad * 0.1, x, y, rad);
+    g.addColorStop(0, '#6b5949');
+    g.addColorStop(.6, '#4e4034');
+    g.addColorStop(1, '#33291f');
+    ctx.beginPath();
+    ctx.arc(x, y, rad, 0, TAU);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.lineWidth = Math.max(1.2, s * 0.03);
+    ctx.strokeStyle = 'rgba(196,160,110,.5)';
+    ctx.beginPath();
+    ctx.arc(x, y, rad * 0.94, 0, TAU);
+    ctx.stroke();
+
+    ctx.lineWidth = Math.max(1, s * 0.012);
+    ctx.strokeStyle = 'rgba(196,160,110,.2)';
+    ctx.beginPath();
+    ctx.arc(x, y, rad * 0.78, 0, TAU);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(214,183,130,.55)';
+    ctx.font = (s * 0.42).toFixed(1) + 'px "KaiTi","STKaiti","Songti SC",serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('？', x, y + s * 0.02);
+    ctx.restore();
+  }
+
   function drawPiece(x, y, p, dim) {
     const s = G.s;
     const rad = s * 0.435;
@@ -541,7 +635,8 @@
         x = fx + (x - fx) * p0;
         y = fy + (y - fy) * p0;
       }
-      drawPiece(x, y, p);
+      if (visibleToHuman(i)) drawPiece(x, y, p);
+      else drawHiddenPiece(x, y);
     }
 
     // 选中环
@@ -560,7 +655,8 @@
     if (state.showTargets && state.targets.length) {
       for (const t of state.targets) {
         const x = px(colOf(t)), y = py(rowOf(t));
-        if (state.board[t]) {
+        // 暗棋里看不见的子不画吃子红圈——你会以为只是一步普通移动
+        if (state.board[t] && visibleToHuman(t)) {
           ctx.strokeStyle = 'rgba(196,58,44,.78)';
           ctx.lineWidth = Math.max(1.6, s * 0.05);
           ctx.beginPath();
@@ -675,6 +771,7 @@
       if (inCheck(state.board, state.turn)) { sub = '将军！'; cls += ' warn'; }
       else if (state.mode === 'ai') sub = isHumanTurn() ? '轮到你走' : '轮到电脑走';
     }
+    if (!state.over && state.revealMsg) { sub = state.revealMsg; cls = 'status-sub warn'; }
     el.statusSub.textContent = sub;
     el.statusSub.className = cls;
 
@@ -719,6 +816,9 @@
     state.over = null;
     state.thinking = false;
     state.lastMove = null;
+    state.revealed = new Array(90).fill(false);
+    state.revealMsg = null;
+    if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
     anim = null;
     el.overlay.hidden = true;
     draw();
@@ -742,7 +842,10 @@
       }
       let res = null;
       try {
-        res = think(state.board, side, state.level);
+        // 暗棋下走不完全信息搜索：它只能看见已经现形的子
+        res = state.fog
+          ? X.thinkFog(state.board, side, state.level, state.revealed)
+          : X.think(state.board, side, state.level);
       } catch (e) {
         const ms = legalMoves(state.board, side);
         res = ms.length ? { move: ms[(Math.random() * ms.length) | 0] } : null;
@@ -770,12 +873,23 @@
     const text = notate(b, mv);
     const moverSide = state.turn;
     const id = gameId;
+    const revBefore = state.revealed.slice();
+    // 走到看不见的暗子上：吃掉并现形
+    const foundHidden = cap && state.fog && !visibleToHuman(to) && colorOf(cap) !== moverSide;
 
     makeMove(b, mv);
-    state.history.push({ mv, cap, text });
+    state.history.push({ mv, cap, text, rev: revBefore });
     state.lastMove = mv;
     state.sel = -1;
     state.targets = [];
+    state.revealed[from] = false;
+    state.revealed[to] = true;
+
+    if (foundHidden) {
+      state.revealMsg = '吃暗子：' + CHARS[colorOf(cap)][kindOf(cap) - 1];
+      if (revealTimer) clearTimeout(revealTimer);
+      revealTimer = setTimeout(() => { state.revealMsg = null; refreshStatus(); }, 3200);
+    }
 
     const opp = 1 - moverSide;
     const gave = inCheck(b, opp);
@@ -789,6 +903,7 @@
     }
 
     refreshMoves();
+    refreshStatus();   // 立刻解禁「悔棋」，别等动画播完
     animate(from, to).then(() => {
       if (id !== gameId) return; // 动画期间被重开/悔棋了
       if (cap) sfx('capture'); else sfx('move');
@@ -861,6 +976,7 @@
     const from = mvFrom(h.mv), to = mvTo(h.mv);
     state.board[from] = state.board[to];
     state.board[to] = h.cap;
+    if (h.rev) state.revealed = h.rev.slice();
     state.turn = 1 - state.turn;
   }
 
@@ -889,17 +1005,14 @@
       state.mode = val;
       el.rowColor.classList.toggle('dim', val === 'pvp');
       el.rowLevel.classList.toggle('dim', val === 'pvp');
+      if (val === 'pvp' && state.fog) setFog(false);  // 双人同屏，迷雾没有意义
+      syncRuleUI();
       resetGame();
     } else if (key === 'color') {
       state.humanColor = Number(val);
       resetGame();
     } else if (key === 'level') {
       state.level = val;
-    } else if (key === 'horseLeg') {
-      config.horseLegBlocked = val === 'classic';
-      el.ruleBadge.textContent = val === 'classic' ? '经典蹩马腿' : '马蹄无阻';
-      el.ruleBadge.classList.toggle('classic', val === 'classic');
-      resetGame();
     }
   }
 
@@ -909,6 +1022,97 @@
       if (!btn || btn.classList.contains('on')) return;
       seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
       applySetting(seg.dataset.key, btn.dataset.value);
+    });
+  });
+
+  /* ================= 规则变体 ================= */
+  const presetBtns = document.querySelectorAll('#presets button');
+  const switchBtns = document.querySelectorAll('#switches .sw');
+
+  function syncRuleUI() {
+    const cur = presetName();
+    presetBtns.forEach((b) => b.classList.toggle('on', b.dataset.preset === cur));
+    const r = getRules();
+    switchBtns.forEach((b) => {
+      const k = b.dataset.rule;
+      const on = k === 'fog' ? state.fog : !!r[k];
+      b.classList.toggle('on', on);
+      // 双人模式下暗棋不可用
+      b.classList.toggle('dim', k === 'fog' && state.mode === 'pvp');
+    });
+    const name = PRESET_NAMES[cur] || '自定义';
+    el.ruleBadge.textContent = name + (state.fog ? ' · 暗棋' : '');
+    el.ruleBadge.classList.toggle('classic', cur === 'classic' && !state.fog);
+
+    const subs = {
+      classic: '标准中国象棋 · 用来对照',
+      feima: '规则变体 · 马永远不会被蹩腿',
+      unobstructed: '规则变体 · 马、象、士 全都不受阻挡',
+      wild: '规则变体 · 无水河 + 士出宫 + 马不蹩腿',
+      custom: '规则变体 · 自定义组合',
+    };
+    const sub = document.getElementById('ruleSub');
+    if (sub) sub.textContent = subs[cur] + (state.fog ? ' · 暗棋' : '');
+
+    renderRuleText();
+  }
+
+  function renderRuleText() {
+    const r = getRules();
+    const li = [];
+    li.push(r.horseNoLeg
+      ? '<p><b>马不蹩腿。</b>马腿被占也照样跳，能隔着子跳、隔着子将军。</p>'
+      : '<p><b>马会蹩腿。</b>马腿被占则该方向跳不过去（经典规则）。</p>');
+    li.push(r.elephantNoEye
+      ? '<p><b>象不塞眼。</b>象眼的子挡不住飞象，象能隔着子看守本方半场。</p>'
+      : '<p><b>象会塞眼。</b>象眼有子则不能飞（经典规则）。</p>');
+    li.push(r.advisorFree
+      ? '<p><b>士可出宫。</b>仕/士可以走出九宫，沿斜线满盘跑。</p>'
+      : '<p><b>士不出宫。</b>仕/士只能在九宫斜走一步（经典规则）。</p>');
+    li.push(r.noRiver
+      ? '<p><b>无水河。</b>没有河界：兵从一开始就能横走，象也能过河参战。</p>'
+      : '<p><b>有河界。</b>兵过河才能横走，象不能过河（经典规则）。</p>');
+    if (state.fog) {
+      li.push('<p><b>暗棋。</b>对方未动过的棋子看不见（显示为「？」），' +
+        '一旦移动过就永久现形；将帅始终可见。<b>可以走进迷雾吃子</b>——吃掉才知道是什么。' +
+        '电脑同样看不见你的暗子。</p>');
+    }
+    li.push('<p style="color:#8d98a6">改动规则会重开一局。</p>');
+    document.getElementById('ruleText').innerHTML = li.join('');
+  }
+
+  function setFog(on) {
+    state.fog = !!on;
+    if (!state.fog) {
+      state.revealed = new Array(90).fill(false);
+      state.revealMsg = null;
+    }
+  }
+
+  presetBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setRules(btn.dataset.preset);
+      state.fog = false;
+      syncRuleUI();
+      resetGame();
+      sfx('move');
+    });
+  });
+
+  switchBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const k = btn.dataset.rule;
+      if (k === 'fog') {
+        if (state.mode === 'pvp') return;
+        setFog(!state.fog);
+      } else {
+        const r = getRules();
+        r[k] = !r[k];
+        setRules(r);
+      }
+      syncRuleUI();
+      resetGame();
+      sfx('move');
     });
   });
 
@@ -934,13 +1138,19 @@
   }
   window.addEventListener('resize', resize);
 
+  setRules('feima');   // 默认就是「飞马」：马不蹩腿
+  syncRuleUI();
+
   requestAnimationFrame(() => {
     resize();
     resetGame();
   });
 
   // 调试钩子：方便自动化测试或排查问题，正常对局用不到
-  window.XQ = { state, G, config, draw, resetGame, playMove, handleSquare, sq: sqOf, mk: mkMove };
+  window.XQ = {
+    state, G, draw, resetGame, playMove, handleSquare, syncRuleUI, setFog,
+    sq: sqOf, mk: mkMove, rules: X.rules, setRules, getRules, presetName, thinkFog: X.thinkFog,
+  };
 })();
 </script>
 </body>

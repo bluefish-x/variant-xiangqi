@@ -34,8 +34,58 @@
   ];
 
   const config = {
-    horseLegBlocked: false, // ← 本变体的核心开关
+    // 兼容旧的单一开关（等价于 horseNoLeg）
+    get horseLegBlocked() { return !rules.horseNoLeg; },
+    set horseLegBlocked(v) { rules.horseNoLeg = !v; },
   };
+
+  /**
+   * 规则开关。默认全关 = 标准象棋。
+   * 每一开关都同时作用于「走法生成」和「被攻击判定」，两边永远一致。
+   */
+  const rules = {
+    horseNoLeg: false,     // 马不蹩腿
+    elephantNoEye: false,  // 象不塞眼
+    advisorFree: false,    // 士可出九宫
+    noRiver: false,        // 无河界：象可过河、兵开局即可横走
+  };
+
+  const PRESETS = {
+    classic:      { horseNoLeg: false, elephantNoEye: false, advisorFree: false, noRiver: false },
+    feima:        { horseNoLeg: true,  elephantNoEye: false, advisorFree: false, noRiver: false },
+    unobstructed: { horseNoLeg: true,  elephantNoEye: true,  advisorFree: true,  noRiver: false },
+    wild:         { horseNoLeg: true,  elephantNoEye: false, advisorFree: true,  noRiver: true },
+  };
+
+  const PRESET_NAMES = {
+    classic: '经典', feima: '飞马', unobstructed: '无阻', wild: '狂野', custom: '自定义',
+  };
+
+  /** 套用预设（传字符串）或直接传开关对象 */
+  function setRules(r) {
+    const src = typeof r === 'string' ? (PRESETS[r] || PRESETS.classic) : (r || PRESETS.classic);
+    for (const k of Object.keys(rules)) rules[k] = !!src[k];
+    return getRules();
+  }
+
+  function getRules() { return Object.assign({}, rules); }
+
+  /** 反查当前开关对应哪个预设，没有就是 custom */
+  function presetName() {
+    for (const [k, v] of Object.entries(PRESETS)) {
+      if (Object.keys(rules).every((x) => !!v[x] === rules[x])) return k;
+    }
+    return 'custom';
+  }
+
+  function shuffle(arr, rnd) {
+    const r = rnd || Math.random;
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr;
+  }
 
   const kindOf = (p) => p & 7;
   const colorOf = (p) => p >> 3;
@@ -122,10 +172,10 @@
         }
         break;
       }
-      case H: { // 马：★ 变体规则——不查马腿，只要求落点合法
+      case H: { // 马：★ 马腿规则可关
         for (let i = 0; i < 8; i++) {
           const dr = HOFF[i][0], dc = HOFF[i][1];
-          if (config.horseLegBlocked) {
+          if (!rules.horseNoLeg) {
             const lr = r + (Math.abs(dr) === 2 ? dr / 2 : 0);
             const lc = c + (Math.abs(dc) === 2 ? dc / 2 : 0);
             if (b[sqOf(lr, lc)]) continue; // 经典规则：马腿被占则不能走
@@ -134,21 +184,21 @@
         }
         break;
       }
-      case E: { // 相/象：田字，塞象眼，不过河
+      case E: { // 相/象：田字，塞象眼，不过河（两条限制各有开关）
         for (let i = 0; i < 4; i++) {
           const dr = DIAG[i][0], dc = DIAG[i][1];
           const rr = r + dr * 2, cc = c + dc * 2;
           if (!inBoard(rr, cc)) continue;
-          if (side === RED ? rr < 5 : rr > 4) continue;
-          if (b[sqOf(r + dr, c + dc)]) continue;
+          if (!rules.noRiver && (side === RED ? rr < 5 : rr > 4)) continue;
+          if (!rules.elephantNoEye && b[sqOf(r + dr, c + dc)]) continue;
           add(rr, cc);
         }
         break;
       }
-      case A: { // 仕/士：九宫斜走一步
+      case A: { // 仕/士：九宫斜走一步（士可出宫时解除九宫限制）
         for (let i = 0; i < 4; i++) {
           const rr = r + DIAG[i][0], cc = c + DIAG[i][1];
-          if (!inPalace(rr, cc, side)) continue;
+          if (!rules.advisorFree && !inPalace(rr, cc, side)) continue;
           add(rr, cc);
         }
         break;
@@ -161,10 +211,10 @@
         }
         break;
       }
-      case P: { // 兵/卒：向前一步，过河后可横走
+      case P: { // 兵/卒：向前一步，过河后可横走（无河界则随时可横走）
         const fwd = side === RED ? -1 : 1;
         add(r + fwd, c);
-        const crossed = side === RED ? r <= 4 : r >= 5;
+        const crossed = rules.noRiver || (side === RED ? r <= 4 : r >= 5);
         if (crossed) { add(r, c - 1); add(r, c + 1); }
         break;
       }
@@ -210,14 +260,14 @@
   function isAttacked(b, sq, by) {
     const r = rowOf(sq), c = colOf(sq);
 
-    // 兵/卒：正面顶；过河后可横顶
+    // 兵/卒：正面顶；过河后可横顶（无河界则随时可横顶）
     const pr = r + (by === RED ? 1 : -1);
     if (pr >= 0 && pr < ROWS) {
       const q = b[sqOf(pr, c)];
       if (q && (q >> 3) === by && (q & 7) === P) return true;
     }
     {
-      const crossed = by === RED ? r <= 4 : r >= 5;
+      const crossed = rules.noRiver || (by === RED ? r <= 4 : r >= 5);
       if (crossed) {
         for (const dc of [-1, 1]) {
           const cc = c + dc;
@@ -236,33 +286,34 @@
       if (q && (q >> 3) === by && (q & 7) === K) return true;
     }
 
-    // 仕/士：贴身斜格
+    // 仕/士：贴身斜格（士可出宫时不限九宫）
     for (let i = 0; i < 4; i++) {
       const rr = r + DIAG[i][0], cc = c + DIAG[i][1];
-      if (!inPalace(rr, cc, by)) continue;
+      if (!inBoard(rr, cc)) continue;
+      if (!rules.advisorFree && !inPalace(rr, cc, by)) continue;
       const q = b[sqOf(rr, cc)];
       if (q && (q >> 3) === by && (q & 7) === A) return true;
     }
 
-    // 相/象：田字，塞象眼
+    // 相/象：田字，塞象眼（象眼/河界各有开关，须与生成器一致）
     for (let i = 0; i < 4; i++) {
       const dr = DIAG[i][0], dc = DIAG[i][1];
       const rr = r + dr * 2, cc = c + dc * 2;
       if (!inBoard(rr, cc)) continue;
       const q = b[sqOf(rr, cc)];
       if (!q || (q >> 3) !== by || (q & 7) !== E) continue;
-      if (by === RED ? rr < 5 : rr > 4) continue;
-      if (b[sqOf(r + dr, c + dc)]) continue;
+      if (!rules.noRiver && (by === RED ? rr < 5 : rr > 4)) continue;
+      if (!rules.elephantNoEye && b[sqOf(r + dr, c + dc)]) continue;
       return true;
     }
 
-    // 马：★ 变体规则——不查马腿
+    // 马：马腿规则与生成器一致
     for (let i = 0; i < 8; i++) {
       const rr = r + HOFF[i][0], cc = c + HOFF[i][1];
       if (!inBoard(rr, cc)) continue;
       const q = b[sqOf(rr, cc)];
       if (!q || (q >> 3) !== by || (q & 7) !== H) continue;
-      if (config.horseLegBlocked) {
+      if (!rules.horseNoLeg) {
         const lr = rr + (Math.abs(HOFF[i][0]) === 2 ? -HOFF[i][0] / 2 : 0);
         const lc = cc + (Math.abs(HOFF[i][1]) === 2 ? -HOFF[i][1] / 2 : 0);
         if (b[sqOf(lr, lc)]) continue;
@@ -468,6 +519,105 @@
     return { move: best.move, score: best.score, depth: best.depth, nodes: ctx.nodes };
   }
 
+  /* ================= 暗棋（迷雾）：采样 + 不完全信息搜索 ================= */
+  /**
+   * 按「已知信息」重建一个可能局面。
+   * visible[sq] === true 表示该格棋子已现形（双方都看得见）；false 表示看不见。
+   * 己方棋子永远已知；将/帅按约定始终可见。
+   * 看不见的敌子按「同兵种数量守恒」随机撒回空白格，撒放时尽量遵守该兵种的合法活动范围，
+   * 这样采样出来的局面才像真的。
+   */
+  function sampleBoard(real, side, visible, rnd) {
+    const b = real.slice();
+    const missing = [];        // 未知敌子的兵种列表
+    const empties = [];
+    const foe = 1 - side;
+
+    for (let i = 0; i < SIZE; i++) {
+      const p = b[i];
+      if (!p) { empties.push(i); continue; }
+      if ((p >> 3) === side) continue;          // 己方：全知
+      if (visible && visible[i]) continue;      // 已现形：全知
+      if ((p & 7) === K) continue;              // 将帅始终可见（约定）
+      missing.push(p & 7);
+      b[i] = 0;
+      empties.push(i);
+    }
+    if (!missing.length) return b;
+
+    shuffle(empties, rnd);
+    shuffle(missing, rnd);
+
+    const canPlace = (kind, sq) => {
+      const r = rowOf(sq), c = colOf(sq);
+      if (kind === A && !rules.advisorFree) return inPalace(r, c, foe);
+      if (kind === E && !rules.noRiver) return foe === RED ? r >= 5 : r <= 4;
+      if (kind === P) return foe === RED ? r <= 6 : r >= 3; // 兵卒不可能在自己后两排
+      return true;
+    };
+
+    for (const kind of missing) {
+      let pick = -1;
+      for (let t = 0; t < empties.length; t++) {
+        if (canPlace(kind, empties[t])) { pick = t; break; }
+      }
+      if (pick < 0) pick = 0;                    // 兜底：随便放
+      if (!empties.length) break;
+      const sq = empties.splice(pick, 1)[0];
+      b[sq] = piece(kind, foe);
+    }
+    return b;
+  }
+
+  /**
+   * 暗棋专用：对 N 个采样局面分别搜索，按「平均分」挑招。
+   * 这样 AI 是在信息不足的情况下做决策，而不是偷看你的暗子。
+   * 最后必须回到真实棋盘做一次合法性过滤——它以为能穿过去的格子，可能真的站着人。
+   */
+  function thinkFog(b, side, level, visible, samples) {
+    const cfg = LEVELS[level] || LEVELS.normal;
+    const N = samples || 6;
+    const depth = Math.max(2, cfg.depth - 2);
+    const t0 = Date.now();
+    const acc = new Map();
+    let used = 0;
+
+    for (let i = 0; i < N; i++) {
+      const left = cfg.time - (Date.now() - t0);
+      if (i > 0 && left < 50) break;
+      const sb = sampleBoard(b, side, visible);
+      const ctx = { nodes: 0, deadline: Date.now() + Math.max(50, Math.floor(left / (N - i))) };
+      let res = null;
+      try { res = rootSearch(sb, side, depth, ctx); } catch (e) { continue; }
+      if (!res || res.move == null) continue;
+      used++;
+      for (const pair of res.scored) {
+        const cur = acc.get(pair[0]) || [0, 0];
+        cur[0] += pair[1]; cur[1]++;
+        acc.set(pair[0], cur);
+      }
+    }
+
+    const real = new Set(legalMoves(b, side));
+    if (!real.size) return null;
+    if (!used || !acc.size) {
+      const ms = Array.from(real);
+      return { move: ms[(Math.random() * ms.length) | 0], score: 0, depth, nodes: 0, samples: 0 };
+    }
+
+    let best = null, bestScore = -Infinity;
+    for (const [mv, v] of acc) {
+      if (!real.has(mv)) continue;               // 撞到看不见的暗子，走不了
+      const avg = v[0] / v[1];
+      if (avg > bestScore) { bestScore = avg; best = mv; }
+    }
+    if (best == null) {
+      const ms = Array.from(real);
+      return { move: ms[(Math.random() * ms.length) | 0], score: 0, depth, nodes: 0, samples: used };
+    }
+    return { move: best, score: bestScore, depth, nodes: 0, samples: used };
+  }
+
   /* ================= 中文记谱 ================= */
   const CN_NUM = '一二三四五六七八九';
 
@@ -526,13 +676,15 @@
     // 常量
     ROWS, COLS, SIZE, RED, BLACK, K, A, E, H, R, C, P, MATE,
     config, CHARS, LEVELS,
+    // 规则开关与预设
+    rules, PRESETS, PRESET_NAMES, setRules, getRules, presetName,
     // 坐标与编码
     kindOf, colorOf, piece, sqOf, rowOf, colOf, mvFrom, mvTo, mkMove, inBoard, inPalace,
     // 规则
     initialBoard, genMoves, genMovesFrom, legalMoves, movesFrom,
     makeMove, unmakeMove, inCheck, isAttacked, findKing,
     // 引擎
-    evaluate, think, perft,
+    evaluate, think, thinkFog, sampleBoard, perft,
     // 记谱
     notate,
   };

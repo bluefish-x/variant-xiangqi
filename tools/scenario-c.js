@@ -17,7 +17,7 @@ S.state.over = null;
 S.state.lastMove = null;
 S.state.sel = -1;
 S.state.targets = [];
-S.config.horseLegBlocked = false;
+S.state.revealed = new Array(90).fill(false);
 
 S.playMove(S.mk(1 * 9 + 0, 0 * 9 + 0));    // 俥九进一，沉底将死
 await wait(900);
