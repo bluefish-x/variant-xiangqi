@@ -51,33 +51,14 @@
     noRiver: false,        // 无河界：象可过河、兵开局即可横走
   };
 
-  const PRESETS = {
-    classic:      { horseNoLeg: false, elephantNoEye: false, advisorFree: false, noRiver: false },
-    feima:        { horseNoLeg: true,  elephantNoEye: false, advisorFree: false, noRiver: false },
-    unobstructed: { horseNoLeg: true,  elephantNoEye: true,  advisorFree: true,  noRiver: false },
-    wild:         { horseNoLeg: true,  elephantNoEye: false, advisorFree: true,  noRiver: true },
-  };
-
-  const PRESET_NAMES = {
-    classic: '经典', feima: '飞马', unobstructed: '无阻', wild: '狂野', custom: '自定义',
-  };
-
-  /** 套用预设（传字符串）或直接传开关对象 */
+  /** 套用一组开关；传对象即可，未提到的项一律关掉 */
   function setRules(r) {
-    const src = typeof r === 'string' ? (PRESETS[r] || PRESETS.classic) : (r || PRESETS.classic);
+    const src = r || {};
     for (const k of Object.keys(rules)) rules[k] = !!src[k];
     return getRules();
   }
 
   function getRules() { return Object.assign({}, rules); }
-
-  /** 反查当前开关对应哪个预设，没有就是 custom */
-  function presetName() {
-    for (const [k, v] of Object.entries(PRESETS)) {
-      if (Object.keys(rules).every((x) => !!v[x] === rules[x])) return k;
-    }
-    return 'custom';
-  }
 
   const kindOf = (p) => p & 7;
   const colorOf = (p) => p >> 3;
@@ -569,8 +550,8 @@
     // 常量
     ROWS, COLS, SIZE, RED, BLACK, K, A, E, H, R, C, P, MATE,
     config, CHARS, LEVELS,
-    // 规则开关与预设
-    rules, PRESETS, PRESET_NAMES, setRules, getRules, presetName,
+    // 规则开关
+    rules, setRules, getRules,
     // 坐标与编码
     kindOf, colorOf, piece, sqOf, rowOf, colOf, mvFrom, mvTo, mkMove, inBoard, inPalace,
     // 规则

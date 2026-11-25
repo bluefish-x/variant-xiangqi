@@ -94,18 +94,7 @@
   .seg button:hover{ color:var(--text); }
   .seg button.on{ background:rgba(217,167,81,.2); color:#f1d09a; box-shadow:inset 0 0 0 1px rgba(217,167,81,.3); }
 
-  /* 规则预设 + 开关 */
-  .presets{ display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:9px; }
-  .presets button{
-    appearance:none; border:1px solid var(--line); background:rgba(255,255,255,.04);
-    color:var(--muted); font:inherit; font-size:12.5px; padding:7px 0; border-radius:9px; cursor:pointer;
-    transition:background .15s, color .15s, border-color .15s;
-  }
-  .presets button:hover{ color:var(--text); }
-  .presets button.on{
-    background:linear-gradient(180deg, rgba(217,167,81,.26), rgba(217,167,81,.14));
-    border-color:rgba(217,167,81,.45); color:#f5d9a8; font-weight:600;
-  }
+  /* 规则开关 */
   .switches{ display:grid; grid-template-columns:1fr 1fr; gap:5px; }
   .switches .sw{
     display:flex; align-items:center; gap:7px; text-align:left;
@@ -207,10 +196,10 @@
       <div class="logo">傌</div>
       <div>
         <h1>Variant Xiangqi</h1>
-        <p id="ruleSub">规则可变动象棋 · 马永远不会被蹩腿</p>
+        <p id="ruleSub">规则可变动象棋 · 四个开关自由组合</p>
       </div>
     </div>
-    <span class="badge" id="ruleBadge">马蹄无阻</span>
+    <span class="badge" id="ruleBadge">开启 1 / 4</span>
   </header>
 
   <main>
@@ -261,13 +250,7 @@
       </div>
 
       <div class="card">
-        <div class="card-title">规则变体</div>
-        <div class="presets" id="presets">
-          <button data-preset="classic">经典</button>
-          <button data-preset="feima" class="on">飞马</button>
-          <button data-preset="unobstructed">无阻</button>
-          <button data-preset="wild">狂野</button>
-        </div>
+        <div class="card-title">规则开关</div>
         <div class="switches" id="switches">
           <button class="sw on" data-rule="horseNoLeg">马不蹩腿</button>
           <button class="sw" data-rule="elephantNoEye">象不塞眼</button>
@@ -312,7 +295,7 @@
     colorOf, kindOf, rowOf, colOf, sqOf,
     initialBoard, legalMoves, movesFrom, inCheck,
     findKing, notate, think, makeMove, unmakeMove, mkMove, mvFrom, mvTo,
-    CHARS, PRESET_NAMES, setRules, getRules, presetName,
+    CHARS, setRules, getRules,
   } = X;
 
   const TAU = Math.PI * 2;
@@ -947,29 +930,17 @@
     });
   });
 
-  /* ================= 规则变体 ================= */
-  const presetBtns = document.querySelectorAll('#presets button');
+  /* ================= 规则开关 ================= */
   const switchBtns = document.querySelectorAll('#switches .sw');
+  const RULE_KEYS = ['horseNoLeg', 'elephantNoEye', 'advisorFree', 'noRiver'];
 
   function syncRuleUI() {
-    const cur = presetName();
-    presetBtns.forEach((b) => b.classList.toggle('on', b.dataset.preset === cur));
     const r = getRules();
     switchBtns.forEach((b) => b.classList.toggle('on', !!r[b.dataset.rule]));
 
-    const name = PRESET_NAMES[cur] || '自定义';
-    el.ruleBadge.textContent = name;
-    el.ruleBadge.classList.toggle('classic', cur === 'classic');
-
-    const subs = {
-      classic: '规则可变动象棋 · 标准规则，用来对照',
-      feima: '规则可变动象棋 · 马永远不会被蹩腿',
-      unobstructed: '规则可变动象棋 · 马、象、士 全都不受阻挡',
-      wild: '规则可变动象棋 · 无水河 + 士出宫 + 马不蹩腿',
-      custom: '规则可变动象棋 · 自定义组合',
-    };
-    const sub = document.getElementById('ruleSub');
-    if (sub) sub.textContent = subs[cur];
+    const on = RULE_KEYS.filter((k) => r[k]).length;
+    el.ruleBadge.textContent = on === 0 ? '标准规则' : '开启 ' + on + ' / ' + RULE_KEYS.length;
+    el.ruleBadge.classList.toggle('classic', on === 0);
 
     renderRuleText();
   }
@@ -992,15 +963,6 @@
     li.push('<p style="color:#8d98a6">改动规则会重开一局。</p>');
     document.getElementById('ruleText').innerHTML = li.join('');
   }
-
-  presetBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      setRules(btn.dataset.preset);
-      syncRuleUI();
-      resetGame();
-      sfx('move');
-    });
-  });
 
   switchBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1036,7 +998,7 @@
   }
   window.addEventListener('resize', resize);
 
-  setRules('feima');   // 默认「飞马」：马不蹩腿
+  setRules({ horseNoLeg: true });   // 默认只开「马不蹩腿」
   syncRuleUI();
 
   requestAnimationFrame(() => {
@@ -1047,7 +1009,7 @@
   // 调试钩子：方便自动化测试或排查问题，正常对局用不到
   window.XQ = {
     state, G, draw, resetGame, playMove, handleSquare, syncRuleUI,
-    sq: sqOf, mk: mkMove, setRules, getRules, presetName,
+    sq: sqOf, mk: mkMove, setRules, getRules,
   };
 })();
 </script>

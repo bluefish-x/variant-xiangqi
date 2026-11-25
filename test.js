@@ -4,8 +4,14 @@ const {
   RED, BLACK, K, A, E, H, R, C, P,
   piece, sqOf, legalMoves, movesFrom, inCheck, isAttacked,
   initialBoard, notate, think, makeMove, unmakeMove, findKing, evaluate,
-  setRules, getRules, presetName, PRESETS,
+  setRules, getRules,
 } = X;
+
+// 四种典型组合（只用于测试对照，程序里没有「模式」这个概念）
+const CLASSIC = {};                                    // 全关 = 标准象棋
+const FEIMA = { horseNoLeg: true };
+const COMBO3 = { horseNoLeg: true, elephantNoEye: true, advisorFree: true };
+const COMBO4 = { horseNoLeg: true, advisorFree: true, noRiver: true };
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
@@ -26,7 +32,7 @@ function bare(extra) {
 
 /* ========== 1. perft：规则开关不能污染基础走法 ========== */
 console.log('\n[1] 经典规则 perft（公开基准 44 / 1920 / 79666）');
-setRules('classic');
+setRules(CLASSIC);
 const b0 = initialBoard();
 let t = Date.now();
 eq('perft(1)', X.perft(b0, RED, 1), 44);
@@ -34,61 +40,62 @@ eq('perft(2)', X.perft(b0, RED, 2), 1920);
 eq('perft(3)', X.perft(b0, RED, 3), 79666);
 console.log('     （' + (Date.now() - t) + 'ms）');
 
-/* ========== 2. 四个预设的着法量 ========== */
-console.log('\n[2] 预设与开关');
-const perftOf = (name) => {
-  setRules(name);
-  const p1 = X.perft(initialBoard(), RED, 1);
-  const p2 = X.perft(initialBoard(), RED, 2);
-  return { p1, p2 };
+/* ========== 2. 四种组合的着法量 ========== */
+console.log('\n[2] 四种典型组合');
+const perftOf = (combo) => {
+  setRules(combo);
+  return { p1: X.perft(initialBoard(), RED, 1), p2: X.perft(initialBoard(), RED, 2) };
 };
-const classic = perftOf('classic');
-const feima = perftOf('feima');
-const unobstructed = perftOf('unobstructed');
-const wild = perftOf('wild');
-for (const [n, v] of [['经典', classic], ['飞马', feima], ['无阻', unobstructed], ['狂野', wild]]) {
-  console.log(`     ${n.padEnd(4)} perft(1)=${v.p1}  perft(2)=${v.p2}`);
+const combos = [
+  ['全关', CLASSIC],
+  ['马不蹩腿', FEIMA],
+  ['马+象+士', COMBO3],
+  ['马+士+无水河', COMBO4],
+];
+const comboPerft = combos.map(([n, c]) => [n, perftOf(c)]);
+for (const [n, v] of comboPerft) {
+  console.log(`     ${n.padEnd(12)} perft(1)=${v.p1}  perft(2)=${v.p2}`);
 }
-eq('经典 perft(1)', classic.p1, 44);
-eq('飞马 perft(1)（多出被象堵住的两个正马）', feima.p1, 46);
-ok('无阻 > 飞马', unobstructed.p1 > feima.p1 && unobstructed.p2 > feima.p2);
-ok('狂野 > 经典', wild.p1 > classic.p1 && wild.p2 > classic.p2);
-ok('狂野不含象眼无阻', PRESETS.wild.elephantNoEye === false);
-ok('无阻含象眼无阻 + 士出宫 + 马不蹩腿',
-  PRESETS.unobstructed.elephantNoEye && PRESETS.unobstructed.advisorFree && PRESETS.unobstructed.horseNoLeg);
-// 预设反查
-setRules('wild'); eq('presetName(wild)', presetName(), 'wild');
-setRules({ horseNoLeg: true }); eq('只有马不蹩腿 → 命中「飞马」', presetName(), 'feima');
-setRules({ elephantNoEye: true }); eq('不在预设里的组合 → custom', presetName(), 'custom');
-setRules('classic');
+eq('全关 perft(1)', comboPerft[0][1].p1, 44);
+eq('只开马不蹩腿 perft(1)（多出被象堵住的两个正马）', comboPerft[1][1].p1, 46);
+ok('马+象+士 比 马不蹩腿 更多着法',
+  comboPerft[2][1].p1 > comboPerft[1][1].p1 && comboPerft[2][1].p2 > comboPerft[1][1].p2);
+ok('马+士+无水河 比 全关 更多着法',
+  comboPerft[3][1].p1 > comboPerft[0][1].p1 && comboPerft[3][1].p2 > comboPerft[0][1].p2);
+// setRules 是整体赋值：没提到的开关会被关掉
+setRules({ horseNoLeg: true, noRiver: true });
+setRules({ elephantNoEye: true });
+ok('setRules 整体赋值，不是增量',
+  getRules().horseNoLeg === false && getRules().noRiver === false && getRules().elephantNoEye === true);
+setRules(CLASSIC);
 
 /* ========== 3. 马不蹩腿 ========== */
 console.log('\n[3] 马不蹩腿');
-setRules('feima');
+setRules(FEIMA);
 const boxed = bare([
   [H, RED, 5, 4],
   [P, RED, 4, 4], [P, RED, 5, 3], [P, RED, 5, 5], [P, RED, 6, 4],
 ]);
 eq('马腿全堵死仍有 8 个落点', movesFrom(boxed, sqOf(5, 4)).length, 8);
-setRules('classic');
+setRules(CLASSIC);
 eq('经典：同样局面一步都走不了', movesFrom(boxed, sqOf(5, 4)).length, 0);
 
 const horseCheck = bare([[H, RED, 2, 4], [P, RED, 1, 4]]);
-setRules('feima');
+setRules(FEIMA);
 ok('马腿被挡照样将军', inCheck(horseCheck, BLACK));
-setRules('classic');
+setRules(CLASSIC);
 ok('经典：同一局面不算将军', !inCheck(horseCheck, BLACK));
 
 /* ========== 4. 象不塞眼 ========== */
 console.log('\n[4] 象不塞眼');
 const eyeBlocked = bare([[E, RED, 9, 2], [P, RED, 8, 3]]);
-setRules('classic');
+setRules(CLASSIC);
 ok('经典：塞象眼飞不过去', !movesFrom(eyeBlocked, sqOf(9, 2)).includes(sqOf(7, 4)));
 setRules({ elephantNoEye: true });
 ok('象眼无阻：可以飞过去', movesFrom(eyeBlocked, sqOf(9, 2)).includes(sqOf(7, 4)));
 // 判定一致：象隔着子也能"看守"落点
 const eyeGuard = bare([[E, BLACK, 0, 2], [P, BLACK, 1, 3], [R, RED, 3, 5]]);
-setRules('classic');
+setRules(CLASSIC);
 ok('经典：象眼被塞时不看守 (2,4)', !isAttacked(board([[K, RED, 9, 4], [K, BLACK, 0, 3], [E, BLACK, 0, 2], [P, BLACK, 1, 3]]), sqOf(2, 4), BLACK));
 setRules({ elephantNoEye: true });
 ok('象眼无阻：隔着子也看守 (2,4)', isAttacked(board([[K, RED, 9, 4], [K, BLACK, 0, 3], [E, BLACK, 0, 2], [P, BLACK, 1, 3]]), sqOf(2, 4), BLACK));
@@ -96,7 +103,7 @@ ok('象眼无阻：隔着子也看守 (2,4)', isAttacked(board([[K, RED, 9, 4], 
 /* ========== 5. 士可出宫 ========== */
 console.log('\n[5] 士可出宫');
 const adv = bare([[A, RED, 7, 4]]);
-setRules('classic');
+setRules(CLASSIC);
 eq('经典：士困在九宫（2 步）', movesFrom(adv, sqOf(7, 4)).length, 2);
 setRules({ advisorFree: true });
 eq('士可出宫：4 步', movesFrom(adv, sqOf(7, 4)).length, 4);
@@ -109,28 +116,28 @@ ok('出宫的士照样参与被攻击判定', isAttacked(advCheck, sqOf(0, 3), B
 /* ========== 6. 无水河 ========== */
 console.log('\n[6] 无水河');
 const pawnStart = bare([[P, RED, 6, 4]]);
-setRules('classic');
+setRules(CLASSIC);
 eq('经典：兵未过河不能横走', movesFrom(pawnStart, sqOf(6, 4)).length, 1);
 setRules({ noRiver: true });
 eq('无水河：开局就能横走（3 步）', movesFrom(pawnStart, sqOf(6, 4)).length, 3);
 
 const eleph = bare([[E, RED, 5, 4]]);
-setRules('classic');
+setRules(CLASSIC);
 eq('经典：象不过河', movesFrom(eleph, sqOf(5, 4)).filter((s) => (s / 9 | 0) < 5).length, 0);
 setRules({ noRiver: true });
 eq('无水河：象可过河（2 步）', movesFrom(eleph, sqOf(5, 4)).filter((s) => (s / 9 | 0) < 5).length, 2);
 
 // 判定一致：兵在河界前也能横顶
 const pawnAtk = board([[K, RED, 9, 4], [K, BLACK, 0, 3], [P, RED, 6, 4]]);
-setRules('classic');
+setRules(CLASSIC);
 ok('经典：未过河的兵不横顶', !isAttacked(pawnAtk, sqOf(6, 3), RED));
 setRules({ noRiver: true });
 ok('无水河：未过河的兵也横顶', isAttacked(pawnAtk, sqOf(6, 3), RED));
 
-/* ========== 7. 其余规则在任何预设下都不变 ========== */
-console.log('\n[7] 不变量（四个预设都成立）');
-for (const name of ['classic', 'feima', 'unobstructed', 'wild']) {
-  setRules(name);
+/* ========== 7. 其余规则在任何组合下都不变 ========== */
+console.log('\n[7] 不变量（四种组合都成立）');
+for (const [name, combo] of combos) {
+  setRules(combo);
   const cannon = bare([[C, RED, 5, 0], [P, RED, 3, 0], [R, BLACK, 1, 0]]);
   const cannon2 = bare([[C, RED, 5, 0], [R, BLACK, 1, 0]]);
   const face = board([[K, RED, 9, 4], [K, BLACK, 0, 4], [C, RED, 7, 4]]);
@@ -145,7 +152,7 @@ for (const name of ['classic', 'feima', 'unobstructed', 'wild']) {
 
 /* ========== 8. 中文记谱 ========== */
 console.log('\n[8] 中文记谱');
-setRules('classic');
+setRules(CLASSIC);
 const start = initialBoard();
 eq('炮二平五', notate(start, (sqOf(7, 7) << 7) | sqOf(7, 4)), '炮二平五');
 eq('傌八进七', notate(start, (sqOf(9, 1) << 7) | sqOf(7, 2)), '傌八进七');
@@ -157,7 +164,7 @@ eq('同列双炮：后炮', notate(twoCannons, (sqOf(7, 4) << 7) | sqOf(6, 4)), 
 
 /* ========== 9. 搜索 ========== */
 console.log('\n[9] 搜索');
-setRules('feima');
+setRules(FEIMA);
 for (const lv of ['easy', 'normal', 'hard']) {
   const pos = board([[K, RED, 9, 4], [K, BLACK, 0, 3], [R, RED, 1, 0], [R, RED, 1, 8]]);
   const r = think(pos, RED, lv);
@@ -175,10 +182,10 @@ for (const lv of ['easy', 'normal', 'hard']) {
   ok('会吃掉白送的俥', (think(pos, RED, 'hard').move & 127) === sqOf(5, 0));
 }
 
-/* ========== 10. 压力测试：每个预设随机自对弈 ========== */
-console.log('\n[10] 四个预设各跑 60 步随机自对弈');
-for (const name of ['classic', 'feima', 'unobstructed', 'wild']) {
-  setRules(name);
+/* ========== 10. 压力测试：每种组合随机自对弈 ========== */
+console.log('\n[10] 四种组合各跑 60 步随机自对弈');
+for (const [name, combo] of combos) {
+  setRules(combo);
   let b = initialBoard(), side = RED, bad = 0;
   for (let i = 0; i < 60; i++) {
     const ms = legalMoves(b, side);

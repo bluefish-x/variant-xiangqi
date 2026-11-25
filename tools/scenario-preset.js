@@ -1,24 +1,21 @@
-﻿const S = window.XQ, E = window.Xiangqi;
+﻿const S = window.XQ;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const click = (rule) => document.querySelector('#switches [data-rule="' + rule + '"]').click();
 await wait(500);
-const out = { preset: S.presetName(), rules: S.getRules(), errors: [] };
-S.handleSquare(9 * 9 + 1);
-out.horseTargets = S.state.targets.length;
-// 切到「无阻」
-document.querySelector('#presets [data-preset="unobstructed"]').click();
-await wait(300);
-out.preset2 = S.presetName();
+const out = { defaultRules: S.getRules(), badge: document.getElementById('ruleBadge').textContent };
+
+// 开「象不塞眼」+「士可出宫」
+click('elephantNoEye'); await wait(260);
+click('advisorFree');   await wait(260);
 out.rules2 = S.getRules();
-S.handleSquare(9 * 9 + 1);
-out.horseTargets2 = S.state.targets.length;
-// 象不塞眼验证：(9,2) 象 被 (8,3) 兵塞眼
-S.handleSquare(9 * 9 + 2);
+out.badge2 = document.getElementById('ruleBadge').textContent;
+S.handleSquare(9 * 9 + 2);          // 红象 (9,2)，象眼 (8,3) 被兵占着
 out.elephantTargets = S.state.targets.length;
-// 切到「狂野」
-document.querySelector('#presets [data-preset="wild"]').click();
-await wait(300);
-out.preset3 = S.presetName();
+
+// 再开「无水河」
+click('noRiver'); await wait(260);
 out.rules3 = S.getRules();
-S.handleSquare(6 * 9 + 4);   // 兵
+out.badge3 = document.getElementById('ruleBadge').textContent;
+S.handleSquare(6 * 9 + 4);          // 红兵，开局即可横走
 out.pawnTargets = S.state.targets.length;
 return out;
